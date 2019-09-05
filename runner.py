@@ -75,16 +75,23 @@ def get_v_state(vid): # return the current state of the target vehicle
 	tls_state = tls[0][3]
 	tls_next_switch = traci.trafficlight.getNextSwitch(tls_id) # get the time of next light
 	time_to_green = 0
+	temp = tls_next_switch - traci.simulation.getTime()
 	if tls_state == 'r':
-		time_to_green = tls_next_switch - traci.simulation.getTime()
+		time_to_green = temp
+	elif tls_state == 'y':
+		time_to_green = temp + 90
 	
+	# calculate leading cars
+	route = traci.vehicle.getRoute(vid)
 	cur = vid
-	leader_count = 0 # leading vehicles
+	leader_count = 0
 	while traci.vehicle.getLeader(cur):
 		cur, dis = traci.vehicle.getLeader(cur)
+		c_route = traci.vehicle.getRoute(cur)
 		if dis > tls_distance: # filter out cars that beyond the tls
 			break
-		leader_count += 1
+		if c_route == route:
+			leader_count += 1
 	
 	res = dict()
 	res['vid'] = vid
@@ -97,11 +104,10 @@ def get_v_state(vid): # return the current state of the target vehicle
 	res['tls_light_count'] = 0
 	res['leading_cars'] = leader_count
 	res['tracking_flag'] = False # flag for recording stop duration
-	res['stop_pos'] = -1 # if a car stopped before passing the tls, this record the distance between the stop point to the tls
-	res['stop_time'] = -1 # the time point that the car stops
 	res['time_of_pass'] = -1 # time of passing the tls
 	res['stop_leading_cars'] = -1 # number of leading cars when stop accurs
 	res['stop_duration'] = -1
+	res['stop_tracking_flag'] = False
 	return res
 
 
@@ -109,6 +115,7 @@ def run():
 	"""execute the TraCI control loop"""
 	step = 0
 	v_dict = dict()
+	record = 0 # data size indicator
 	# we start with phase 2 where EW has green
 	traci.trafficlight.setPhase("0", 2)
 	while traci.simulation.getMinExpectedNumber() > 0:
@@ -119,37 +126,38 @@ def run():
 			if not traci.vehicle.getNextTLS(v): # filter out cars that have passed the tls
 				continue
 			v_new = get_v_state(v)
-			s = traci.trafficlight.getControlledLanes(v_new['tls'])
-			#print(s)
-			if v not in v_dict and not traci.vehicle.isStopped(v) and traci.vehicle.getNextTLS(v) and step % 55 == 0: # if the vehicle is moving, added to the dictionary and track it
+
+			if v not in v_dict and not traci.vehicle.isStopped(v) and traci.vehicle.getNextTLS(v) and step % 55 == 0 and v_new['tls_distance'] != 500.25: # if the vehicle is moving, added to the dictionary and track it
 				v_dict[v] = get_v_state(v)
 				
 			if v in v_dict and traci.vehicle.getNextTLS(v):
-				if v_new['tls_state'] != v_dict[v]['tls_state']: # count how many rounds the tls changed
+				# count how many times that the tls turns to green
+				if v_new['tls_state'] == 'G' and v_dict[v]['tls_state'] == 'r': 
 					v_dict[v]['tls_light_count'] += 1
 					v_dict[v]['tls_state'] = v_new['tls_state']
 					
 				if traci.vehicle.getSpeed(v) == 0:
-					if not v_dict[v]['tracking_flag']:
+					if not (v_dict[v]['tracking_flag'] or v_dict[v]['stop_tracking_flag']):
 						v_dict[v]['stop_starts'] = traci.simulation.getTime()
-						v_dict[v]['stop_distance'] = traci.vehicle.getNextTLS(v)[0][2]
+						v_dict[v]['stop_distance'] = v_new['tls_distance']
 						v_dict[v]['stop_leading_cars'] = v_new['leading_cars']
 						v_dict[v]['tracking_flag'] = True
 				elif v_dict[v]['tracking_flag']:
 					v_dict[v]['stop_ends'] = traci.simulation.getTime()
 					v_dict[v]['stop_duration'] = v_dict[v]['stop_ends'] - v_dict[v]['stop_starts']
-					v_dict[v]['stop_time'] = v_dict[v]['stop_ends']
 					v_dict[v]['tracking_flag'] = False
+					v_dict[v]['stop_tracking_flag'] = True
 				
 				if traci.vehicle.getNextTLS(v)[0][2] < 1:
 					v_dict[v]['time_of_pass'] = traci.simulation.getTime()
 					with open('saved.csv', 'a') as csvfile:
 						writer = csv.writer(csvfile)
-						data = [v_dict[v]['tls'], v_dict[v]['vid'], v_dict[v]['init_time'], v_dict[v]['tls_distance'], 
+						data = [v_dict[v]['vid'], v_dict[v]['init_time'], v_dict[v]['tls_distance'], 
 								v_dict[v]['stop_distance'], v_dict[v]['time_to_green'], v_dict[v]['tls_light_count'], 
 								v_dict[v]['time_of_pass'], v_dict[v]['leading_cars'], v_dict[v]['stop_leading_cars'], v_dict[v]['stop_duration']]
 						writer.writerow(data)
-						#print('writting......')
+						record += 1
+						print('Record: ',  record)
 					v_dict.pop(v)
 
 		step += 1
