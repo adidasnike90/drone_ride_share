@@ -116,11 +116,15 @@ def run():
 		v_list = traci.vehicle.getIDList()
 		
 		for v in v_list:
+			if not traci.vehicle.getNextTLS(v): # filter out cars that have passed the tls
+				continue
+			v_new = get_v_state(v)
+			s = traci.trafficlight.getControlledLanes(v_new['tls'])
+			#print(s)
 			if v not in v_dict and not traci.vehicle.isStopped(v) and traci.vehicle.getNextTLS(v) and step % 55 == 0: # if the vehicle is moving, added to the dictionary and track it
 				v_dict[v] = get_v_state(v)
-			
+				
 			if v in v_dict and traci.vehicle.getNextTLS(v):
-				v_new = get_v_state(v)
 				if v_new['tls_state'] != v_dict[v]['tls_state']: # count how many rounds the tls changed
 					v_dict[v]['tls_light_count'] += 1
 					v_dict[v]['tls_state'] = v_new['tls_state']
@@ -145,7 +149,7 @@ def run():
 								v_dict[v]['stop_distance'], v_dict[v]['time_to_green'], v_dict[v]['tls_light_count'], 
 								v_dict[v]['time_of_pass'], v_dict[v]['leading_cars'], v_dict[v]['stop_leading_cars'], v_dict[v]['stop_duration']]
 						writer.writerow(data)
-						print('writting......')
+						#print('writting......')
 					v_dict.pop(v)
 
 		step += 1
