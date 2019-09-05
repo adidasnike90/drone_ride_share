@@ -1,19 +1,7 @@
 #!/usr/bin/env python
-# Eclipse SUMO, Simulation of Urban MObility; see https://eclipse.org/sumo
-# Copyright (C) 2009-2019 German Aerospace Center (DLR) and others.
-# This program and the accompanying materials
-# are made available under the terms of the Eclipse Public License v2.0
-# which accompanies this distribution, and is available at
-# http://www.eclipse.org/legal/epl-v20.html
-# SPDX-License-Identifier: EPL-2.0
 
 # @file	runner.py
-# @author  Lena Kalleske
-# @author  Daniel Krajzewicz
-# @author  Michael Behrisch
-# @author  Jakob Erdmann
-# @date	2009-03-26
-# @version $Id$
+# @author  Fang Li
 
 from __future__ import absolute_import
 from __future__ import print_function
@@ -67,6 +55,19 @@ guiShape="passenger"/>
 				vehNr += 1
 		print("</routes>", file=routes)
 
+def get_leader_number(vid): # return the number of leading cars
+	car_list = traci.vehicle.getIDList()
+	c_route = traci.vehicle.getRoute(vid)
+	c_distance = traci.vehicle.getNextTLS(vid)[0][2]
+	count = 0
+	for i in car_list:
+		if traci.vehicle.getNextTLS(i):
+			dist = traci.vehicle.getNextTLS(i)[0][2]
+			route = traci.vehicle.getRoute(i)
+			if dist < c_distance and route == c_route:
+				count += 1
+				
+	return count
 
 def get_v_state(vid): # return the current state of the target vehicle
 	tls = traci.vehicle.getNextTLS(vid)
@@ -84,14 +85,6 @@ def get_v_state(vid): # return the current state of the target vehicle
 	# calculate leading cars
 	route = traci.vehicle.getRoute(vid)
 	cur = vid
-	leader_count = 0
-	while traci.vehicle.getLeader(cur):
-		cur, dis = traci.vehicle.getLeader(cur)
-		c_route = traci.vehicle.getRoute(cur)
-		if dis > tls_distance: # filter out cars that beyond the tls
-			break
-		if c_route == route:
-			leader_count += 1
 	
 	res = dict()
 	res['vid'] = vid
@@ -102,7 +95,6 @@ def get_v_state(vid): # return the current state of the target vehicle
 	res['stop_distance'] = -1
 	res['time_to_green'] = time_to_green
 	res['tls_light_count'] = 0
-	res['leading_cars'] = leader_count
 	res['tracking_flag'] = False # flag for recording stop duration
 	res['time_of_pass'] = -1 # time of passing the tls
 	res['stop_leading_cars'] = -1 # number of leading cars when stop accurs
@@ -129,6 +121,7 @@ def run():
 
 			if v not in v_dict and not traci.vehicle.isStopped(v) and traci.vehicle.getNextTLS(v) and step % 55 == 0 and v_new['tls_distance'] != 500.25: # if the vehicle is moving, added to the dictionary and track it
 				v_dict[v] = get_v_state(v)
+				v_dict[v]['leading_cars'] = get_leader_number(v)
 				
 			if v in v_dict and traci.vehicle.getNextTLS(v):
 				# count how many times that the tls turns to green
@@ -140,7 +133,9 @@ def run():
 					if not (v_dict[v]['tracking_flag'] or v_dict[v]['stop_tracking_flag']):
 						v_dict[v]['stop_starts'] = traci.simulation.getTime()
 						v_dict[v]['stop_distance'] = v_new['tls_distance']
-						v_dict[v]['stop_leading_cars'] = v_new['leading_cars']
+						#if v_dict[v]['leading_cars'] < v_new['leading_cars']:
+							#continue
+						v_dict[v]['stop_leading_cars'] = get_leader_number(v)
 						v_dict[v]['tracking_flag'] = True
 				elif v_dict[v]['tracking_flag']:
 					v_dict[v]['stop_ends'] = traci.simulation.getTime()
